@@ -2,6 +2,37 @@
 #include "Utils/MemoryMgr.h"
 #include "Utils/Patterns.h"
 
+namespace AnalogTriggersFix
+{
+	static float leftTrigger, rightTrigger;
+	static void __stdcall SetTriggerValues(uintptr_t padData, uint32_t buttonsMask)
+	{
+		uint16_t* rightTriggerPtr = reinterpret_cast<uint16_t*>(padData + 0x18);
+		uint16_t* leftTriggerPtr = reinterpret_cast<uint16_t*>(padData + 0x1A);
+
+		auto leftVal = static_cast<uint16_t>(leftTrigger * 255.0f);
+		auto rightVal = static_cast<uint16_t>(rightTrigger * 255.0f);
+		
+		if (leftVal != 0)
+		{
+			*leftTriggerPtr = leftVal;
+		}
+		else
+		{
+			*leftTriggerPtr = (buttonsMask & 0x20000) != 0 ? 255 : 0;
+		}
+
+		if (rightVal != 0)
+		{
+			*rightTriggerPtr = rightVal;
+		}
+		else
+		{
+			*rightTriggerPtr = (buttonsMask & 0x10000) != 0 ? 255 : 0;
+		}
+	}
+};
+
 void OnInitializeHook()
 {
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
@@ -45,6 +76,67 @@ void OnInitializeHook()
 		{
 			Patch<int32_t>(match.get<void>(1), -NEW_DEADZONE);
 		});
+	}
+	TXN_CATCH();
+
+
+	// Analog triggers fix
+	try
+	{
+		using namespace AnalogTriggersFix;
+
+		auto read_trigger_data = pattern("FF D0 D8 1D ? ? ? ? DF E0 F6 C4 41 75 0D 81 4C 24 ? ? ? ? ? C6 44 24").count(2);
+		auto set_trigger_data = reinterpret_cast<uintptr_t>(get_pattern("8B 4C 24 10 66 89 43 22", 8));
+		auto set_trigger_data_jmp_dest = reinterpret_cast<uintptr_t>(get_pattern("BF ? ? ? ? F6 C1 20 75 04"));
+
+		auto jmp = [](uintptr_t& addr, uintptr_t dest)
+		{
+			const ptrdiff_t offset = dest - (addr+2);
+			if (offset >= INT8_MIN && offset <= INT8_MAX)
+			{
+				Patch(addr, { 0xEB, static_cast<uint8_t>(offset) });
+				addr += 2;
+			}
+			else
+			{
+				InjectHook(addr, dest, PATCH_JUMP);
+				addr += 5;
+			}
+		};
+
+		auto fstp = [](uintptr_t& addr, float* var)
+		{
+			Patch(addr, { 0xD9, 0x1D });
+			Patch(addr + 2, var);
+			addr += 6;
+		};
+
+		{
+			const auto match = read_trigger_data.get(0);
+			const auto dest = reinterpret_cast<uintptr_t>(match.get<void>(0x1C));
+			auto addr = reinterpret_cast<uintptr_t>(match.get<void>(2));
+
+			fstp(addr, &rightTrigger);
+			jmp(addr, dest);
+		}
+
+		{
+			const auto match = read_trigger_data.get(1);
+			const auto dest = reinterpret_cast<uintptr_t>(match.get<void>(0x1C));
+			auto addr = reinterpret_cast<uintptr_t>(match.get<void>(2));
+
+			fstp(addr, &leftTrigger);
+			jmp(addr, dest);
+		}
+
+		{
+			auto addr = set_trigger_data;
+
+			Patch(addr, {0x51, 0x51, 0x53}); addr += 3; // push ecx / push ecx / push ebx
+			InjectHook(addr, SetTriggerValues, PATCH_CALL); addr += 5;
+			Patch(addr, { 0x59 }); addr += 1;  // pop ecx
+			jmp(addr, set_trigger_data_jmp_dest);
+		}
 	}
 	TXN_CATCH();
 }
