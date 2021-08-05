@@ -46,6 +46,27 @@ namespace AltF4Fix
 	static auto* const pPeekMessageA_HandleQuit = &PeekMessageA_HandleQuit;
 }
 
+namespace WindowDimensionsFix
+{
+	HWND WINAPI CreateWindowExA_AdjustRect(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
+	{
+		dwStyle &= ~WS_MAXIMIZEBOX;
+		if (X != CW_USEDEFAULT && nWidth != CW_USEDEFAULT)
+		{
+			RECT rect { X, Y, X + nWidth, Y + nHeight };
+			if (AdjustWindowRectEx(&rect, dwStyle, hMenu != nullptr, dwExStyle) != FALSE)
+			{
+				X = rect.left;
+				Y = rect.top;
+				nWidth = rect.right - rect.left;
+				nHeight = rect.bottom - rect.top;
+			}
+		}
+		return CreateWindowExA(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+	}
+	static auto* const pCreateWindowExA_AdjustRect = &CreateWindowExA_AdjustRect;
+}
+
 void OnInitializeHook()
 {
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
@@ -172,6 +193,21 @@ void OnInitializeHook()
 
 		auto peek_msg = get_pattern("8B 1D ? ? ? ? 57 57 57 57", 2);
 		Patch(peek_msg, &pPeekMessageA_HandleQuit);
+	}
+	TXN_CATCH();
+
+
+	// Adjust the window rect to keep proper dimensions of the client area
+	// Also disable the Maximize button and disable WM_GETMINMAXINFO handling so window is not forcibly constrained
+	try
+	{
+		using namespace WindowDimensionsFix;
+
+		auto create_window = get_pattern("FF 15 ? ? ? ? 89 86 ? ? ? ? 33 FF", 2);
+		auto wnd_proc_minmax_jumptable = get_pattern("8D 46 FF 83 F8 23", 5);
+
+		Patch(create_window, &pCreateWindowExA_AdjustRect);
+		Patch<uint8_t>(wnd_proc_minmax_jumptable, 0x22);
 	}
 	TXN_CATCH();
 }
