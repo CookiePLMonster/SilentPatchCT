@@ -33,6 +33,19 @@ namespace AnalogTriggersFix
 	}
 };
 
+namespace AltF4Fix
+{
+	BOOL WINAPI PeekMessageA_HandleQuit(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
+	{
+		if (PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg) != FALSE)
+		{
+			return lpMsg->message != WM_QUIT;
+		}
+		return FALSE;
+	}
+	static auto* const pPeekMessageA_HandleQuit = &PeekMessageA_HandleQuit;
+}
+
 void OnInitializeHook()
 {
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
@@ -148,6 +161,17 @@ void OnInitializeHook()
 
 		Patch(old_fix1, {0x0F, 0xB6, 0x44, 0xFB, 0x17});
 		Patch(old_fix2, {0x47, 0x01, 0x00, 0x00});
+	}
+	TXN_CATCH();
+
+
+	// Fix Alt+F4 (short-circuit WM_QUIT)
+	try
+	{
+		using namespace AltF4Fix;
+
+		auto peek_msg = get_pattern("8B 1D ? ? ? ? 57 57 57 57", 2);
+		Patch(peek_msg, &pPeekMessageA_HandleQuit);
 	}
 	TXN_CATCH();
 }
