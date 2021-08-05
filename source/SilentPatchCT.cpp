@@ -76,6 +76,10 @@ void OnInitializeHook()
 		{
 			Patch<int32_t>(match.get<void>(1), -NEW_DEADZONE);
 		});
+
+		// Now try to undo the old analog fix to avoid conflicts (let it throw an exception if the fix isn't here)
+		auto old_fix = get_pattern("E9 07 A7 04 00 90 90");
+		Patch(old_fix, {0x80, 0x3D, 0x5E, 0xFA, 0x64, 0x01, 0x00});
 	}
 	TXN_CATCH();
 
@@ -137,6 +141,13 @@ void OnInitializeHook()
 			Patch(addr, { 0x59 }); addr += 1;  // pop ecx
 			jmp(addr, set_trigger_data_jmp_dest);
 		}
+
+		// Now try to undo the old analog fix to avoid conflicts (let it throw an exception if the fix isn't here)
+		auto old_fix1 = get_pattern("E9 C5 D5 0A 00");
+		auto old_fix2 = get_pattern("E9 EA A6 04 00", 1);
+
+		Patch(old_fix1, {0x0F, 0xB6, 0x44, 0xFB, 0x17});
+		Patch(old_fix2, {0x47, 0x01, 0x00, 0x00});
 	}
 	TXN_CATCH();
 }
