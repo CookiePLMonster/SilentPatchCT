@@ -279,4 +279,24 @@ void OnInitializeHook()
 		Patch<uint32_t>(wrong_ptr_access, 0x118);
 	}
 	TXN_CATCH();
+
+
+	// Fix analog deadzones
+	// Makes the analog deadzone smaller (0.24 -> 0.1) and digital deadzone bigger (0.95)
+	// Fixes DInput analog steering and makes XInput steering smoother
+	try
+	{
+		static constexpr float ANALOG_DEADZONE = 0.1f;
+		static constexpr float DIGITAL_DEADZONE = 0.95f;
+
+		float* deadzone_val = *get_pattern<float*>("51 8D 4C 24 10 D9 1C 24 E8 ? ? ? ? D9 44 24 10", -6 + 2);
+		auto digital_deadzones = pattern("D9 5D 08 D9 05 ? ? ? ? D9 1C 24").count(4);
+
+		*deadzone_val = ANALOG_DEADZONE;
+
+		digital_deadzones.for_each_result([](hook::pattern_match match) {
+			Patch(match.get<void>(3 + 2), &DIGITAL_DEADZONE);
+		});
+	}
+	TXN_CATCH();
 }
