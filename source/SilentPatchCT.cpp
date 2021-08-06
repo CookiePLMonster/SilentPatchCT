@@ -67,6 +67,23 @@ namespace WindowDimensionsFix
 	static auto* const pCreateWindowExA_AdjustRect = &CreateWindowExA_AdjustRect;
 }
 
+namespace DInputCrashFix
+{
+	static void* (*orgOperatorNew)(size_t size);
+	static void* operatorNew_ZeroField(size_t size)
+	{
+		// Allocate and zero 4 bytes at +0x118
+		void* result = orgOperatorNew(size);
+		if (result != nullptr)
+		{
+			const uintptr_t addr = reinterpret_cast<uintptr_t>(result);
+			void** ptr = reinterpret_cast<void**>(addr + 0x118);
+			*ptr = nullptr;
+		}
+		return result;
+	}
+}
+
 void OnInitializeHook()
 {
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
@@ -208,6 +225,23 @@ void OnInitializeHook()
 
 		Patch(create_window, &pCreateWindowExA_AdjustRect);
 		Patch<uint8_t>(wnd_proc_minmax_jumptable, 0x22);
+	}
+	TXN_CATCH();
+
+
+	// Fix DInput device crashes
+	try
+	{
+		using namespace DInputCrashFix;
+
+		auto operator_new = get_pattern("8B F0 83 C4 04 85 F6 74 71", -5);
+		auto wrong_ptr_access = get_pattern("39 9E ? ? ? ? 74 23", 2);
+
+		ReadCall(operator_new, orgOperatorNew);
+		InjectHook(operator_new, operatorNew_ZeroField);
+
+		// Should read field_118 instead of field_114 (copypaste error?)
+		Patch<uint32_t>(wrong_ptr_access, 0x118);
 	}
 	TXN_CATCH();
 }
