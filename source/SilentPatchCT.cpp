@@ -10,8 +10,11 @@ namespace AnalogTriggersFix
 		uint16_t* rightTriggerPtr = reinterpret_cast<uint16_t*>(padData + 0x18);
 		uint16_t* leftTriggerPtr = reinterpret_cast<uint16_t*>(padData + 0x1A);
 
-		auto leftVal = static_cast<uint16_t>(leftTrigger * 255.0f);
-		auto rightVal = static_cast<uint16_t>(rightTrigger * 255.0f);
+		const float leftClamped = std::min(1.0f, std::exchange(leftTrigger, 0.0f));
+		const float rightClamped = std::min(1.0f, std::exchange(rightTrigger, 0.0f));
+
+		auto leftVal = static_cast<uint16_t>(leftClamped * 255.0f);
+		auto rightVal = static_cast<uint16_t>(rightClamped * 255.0f);
 		
 		if (leftVal != 0)
 		{
@@ -177,11 +180,19 @@ void OnInitializeHook()
 			addr += 6;
 		};
 
+		auto fadd = [](uintptr_t& addr, float* var)
+		{
+			Patch(addr, { 0xD8, 0x05 });
+			Patch(addr + 2, var);
+			addr += 6;
+		};
+
 		{
 			const auto match = read_trigger_data.get(0);
 			const auto dest = reinterpret_cast<uintptr_t>(match.get<void>(0x1C));
 			auto addr = reinterpret_cast<uintptr_t>(match.get<void>(2));
 
+			fadd(addr, &rightTrigger);
 			fstp(addr, &rightTrigger);
 			jmp(addr, dest);
 		}
@@ -191,6 +202,7 @@ void OnInitializeHook()
 			const auto dest = reinterpret_cast<uintptr_t>(match.get<void>(0x1C));
 			auto addr = reinterpret_cast<uintptr_t>(match.get<void>(2));
 
+			fadd(addr, &leftTrigger);
 			fstp(addr, &leftTrigger);
 			jmp(addr, dest);
 		}
