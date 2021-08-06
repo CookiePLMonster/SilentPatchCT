@@ -257,9 +257,11 @@ void OnInitializeHook()
 
 		auto create_window = get_pattern("FF 15 ? ? ? ? 89 86 ? ? ? ? 33 FF", 2);
 		auto wnd_proc_minmax_jumptable = get_pattern("8D 46 FF 83 F8 23", 5);
+		auto set_window_long_overlapped = get_pattern("68 ? ? ? ? 6A F0 51", 1);
 
 		Patch(create_window, &pCreateWindowExA_AdjustRect);
 		Patch<uint8_t>(wnd_proc_minmax_jumptable, 0x22);
+		Patch<uint32_t>(set_window_long_overlapped, WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX);
 	}
 	TXN_CATCH();
 
