@@ -31,6 +31,17 @@ namespace AnalogTriggersFix
 			*rightTriggerPtr = (buttonsMask & 0x10000) != 0 ? 255 : 0;
 		}
 	}
+
+	static __declspec(naked) void LoadDeadzone()
+	{
+		static constexpr float TRIGGER_FULL_PRESS_ZONE = 250.0f;
+		_asm
+		{
+			fstp	[ebp+8]
+			fld		[TRIGGER_FULL_PRESS_ZONE]
+			retn
+		}
+	}
 };
 
 namespace AltF4Fix
@@ -199,6 +210,18 @@ void OnInitializeHook()
 
 		Patch(old_fix1, {0x0F, 0xB6, 0x44, 0xFB, 0x17});
 		Patch(old_fix2, {0x47, 0x01, 0x00, 0x00});
+	}
+	TXN_CATCH();
+
+
+	// Fixup XInput triggers digital press deadzone
+	// Fixes a brief "digital press" of a trigger if the input value is below the analog input deadzone
+	try
+	{
+		using namespace AnalogTriggersFix;
+
+		auto load_deadzone = get_pattern("D9 5D 08 D9 EE");
+		InjectHook(load_deadzone, LoadDeadzone, PATCH_CALL);
 	}
 	TXN_CATCH();
 
