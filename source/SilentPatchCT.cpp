@@ -98,6 +98,77 @@ namespace DInputCrashFix
 	}
 }
 
+namespace ClassicHotkeysRestore
+{
+	static bool HotkeyModifierPressed()
+	{
+		// Shift + Alt
+		return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+	}
+
+	template<int vKey>
+	static bool IsKeyJustPressed()
+	{
+		static bool pressed = false;
+		if ((GetAsyncKeyState(vKey) & 0x8000) != 0)
+		{
+			if (!pressed)
+			{
+				pressed = true;
+				return true;
+			}
+		}
+		else
+		{
+			pressed = false;
+		}
+		return false;
+	}
+
+	static unsigned int* enableCameraCheats;
+	static unsigned int* requestedCameraMode;
+
+	static void (*orgProcessCameraChanges)();
+	static void ProcessCameraChanges_PollHotkeys()
+	{
+		if (HotkeyModifierPressed())
+		{
+			if (IsKeyJustPressed<VK_F5>())
+			{
+				*enableCameraCheats = 1;
+				*requestedCameraMode = 1;
+			}
+			else if (IsKeyJustPressed<VK_F6>())
+			{
+				*enableCameraCheats = 1;
+				*requestedCameraMode = 2;
+			}
+			else if (IsKeyJustPressed<VK_F7>())
+			{
+				*enableCameraCheats = 1;
+				*requestedCameraMode = 3;
+			}
+		}
+
+		orgProcessCameraChanges();
+	}
+
+	static unsigned int* drawSpeedometer;
+
+	static void (*orgReroutedFunc)(void* param);
+	static void ReroutedFunc_ToggleSpeedometer(void* param)
+	{
+		if (HotkeyModifierPressed())
+		{
+			if (IsKeyJustPressed<VK_F8>())
+			{
+				*drawSpeedometer ^= 1;
+			}
+		}
+		orgReroutedFunc(param);
+	}
+}
+
 void OnInitializeHook()
 {
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
@@ -301,4 +372,46 @@ void OnInitializeHook()
 		});
 	}
 	TXN_CATCH();
+
+
+	// Restored old PC hotkeys:
+	// Camera change (Shift + Alt + F5-F7)
+	// Speedometer (Shift + Alt + F8)
+	{
+		using namespace ClassicHotkeysRestore;
+
+		// Camera
+		try
+		{
+			void* process_changes[] = {
+				get_pattern("E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? BE ? ? ? ? 39 35"),
+				get_pattern("E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 83 E8 00"),
+			};
+
+			auto enable_cam_cheats = *get_pattern<unsigned int*>("BE 01 00 00 00 39 3D", 5 + 2);
+			auto requested_cam_mode = *get_pattern<unsigned int*>("74 4B A1 ? ? ? ? 3B C6", 2 + 1);
+
+			enableCameraCheats = enable_cam_cheats;
+			requestedCameraMode = requested_cam_mode;
+
+			ReadCall(process_changes[0], orgProcessCameraChanges);
+			for (void* addr : process_changes)
+			{
+				InjectHook(addr, ProcessCameraChanges_PollHotkeys);
+			}
+		}
+		TXN_CATCH();
+
+		// Speedometer
+		try
+		{
+			auto draw_speedo_pattern = pattern("68 ? ? ? ? E8 ? ? ? ? 83 C4 04 BE ? ? ? ? E8 ? ? ? ? 83 3D ? ? ? ? 00").get_one();
+
+			drawSpeedometer = *draw_speedo_pattern.get<unsigned int*>(25);
+
+			ReadCall(draw_speedo_pattern.get<void>(5), orgReroutedFunc);
+			InjectHook(draw_speedo_pattern.get<void>(5), ReroutedFunc_ToggleSpeedometer);
+		}
+		TXN_CATCH();
+	}
 }
